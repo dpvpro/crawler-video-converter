@@ -30,14 +30,14 @@ const (
 	// Целевая суммарная загрузка CPU в процентах
 	// 50 = использовать 50% от всех ядер
 	// 100 = использовать все ядра
-	TARGET_CPU_PERCENT = 25
+	TARGET_CPU_PERCENT = 50
 
 	// Максимальное количество одновременных конвертаций
 	// Рассчитывается динамически на основе TARGET_CPU_PERCENT
 	MAX_WORKERS = 2
 
 	// Nice level для процессов ffmpeg (0-19, больше = ниже приоритет)
-	NICE_LEVEL = 10
+	NICE_LEVEL = 19
 )
 
 // VideoFile представляет видео файл для конвертации
@@ -413,7 +413,6 @@ func processFile(file VideoFile, pm *ProcessManager, threadsPerWorker int) int {
 			"-svtav1-params", "lp="+strconv.Itoa(threadsPerWorker),
 			"-c:a", "aac",
 			"-b:a", "128k",
-			"-y", // Перезаписывать если существует
 			outputPath,
 		)
 	} else {
@@ -429,14 +428,16 @@ func processFile(file VideoFile, pm *ProcessManager, threadsPerWorker int) int {
 			"-svtav1-params", "lp="+strconv.Itoa(threadsPerWorker),
 			"-c:a", "aac",
 			"-b:a", "128k",
-			"-y", // Перезаписывать если существует
 			outputPath,
 		)
 	}
 
 	// Перенаправляем вывод ffmpeg (можно включить для отладки)
-	cmd.Stdout = nil
-	cmd.Stderr = nil
+	// cmd.Stdout = nil
+	// cmd.Stderr = nil
+
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stdout
 
 	// Запускаем команду
 	err := cmd.Start()
