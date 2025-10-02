@@ -33,8 +33,8 @@ const (
 	targetCpuPercent = 20
 
 	// Максимальное количество одновременных конвертаций
-	// Рассчитывается динамически на основе TARGET_CPU_PERCENT
-	maxWorkers = 2
+	// Рассчитывается динамически на основе targetCpuPercent
+	maxWorkers = 1
 
 	// Nice level для процессов ffmpeg (0-19, больше = ниже приоритет)
 	niceLevel = 19
