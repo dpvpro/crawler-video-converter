@@ -19,25 +19,25 @@ import (
 
 const (
 	// Расширения файлов для поиска (через запятую)
-	// SOURCE_EXTENSIONS = ".MOV,.mov,.MP4,.mp4,.AVI,.avi"
-	SOURCE_EXTENSIONS = ".MOV,.mov"
+	// sourceExtensions = ".mov,.mp4,.avi"
+	sourceExtensions = ".mov"
 	// Выходное расширение
-	OUTPUT_EXTENSION = ".mkv"
+	outputExtension = ".mkv"
 	// Имя каталога для конвертированных файлов
-	CONVERTED_DIR = "converted"
+	convertedDir = "converted"
 
 	// === КОНТРОЛЬ ЗАГРУЗКИ CPU ===
 	// Целевая суммарная загрузка CPU в процентах
 	// 50 = использовать 50% от всех ядер
 	// 100 = использовать все ядра
-	TARGET_CPU_PERCENT = 20
+	targetCpuPercent = 20
 
 	// Максимальное количество одновременных конвертаций
 	// Рассчитывается динамически на основе TARGET_CPU_PERCENT
-	MAX_WORKERS = 2
+	maxWorkers = 2
 
 	// Nice level для процессов ffmpeg (0-19, больше = ниже приоритет)
-	NICE_LEVEL = 19
+	niceLevel = 19
 )
 
 // VideoFile представляет видео файл для конвертации
@@ -150,12 +150,12 @@ func main() {
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Использование: %s <путь_к_каталогу>\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "\nПрограмма рекурсивно обходит указанный каталог, находит видео файлы\n")
-		fmt.Fprintf(os.Stderr, "с расширениями %s и конвертирует их в формат MKV с кодеком AV1.\n", SOURCE_EXTENSIONS)
-		fmt.Fprintf(os.Stderr, "\nРезультаты сохраняются в подкаталог '%s' рядом с исходными файлами.\n", CONVERTED_DIR)
+		fmt.Fprintf(os.Stderr, "с расширениями %s и конвертирует их в формат MKV с кодеком AV1.\n", sourceExtensions)
+		fmt.Fprintf(os.Stderr, "\nРезультаты сохраняются в подкаталог '%s' рядом с исходными файлами.\n", convertedDir)
 		fmt.Fprintf(os.Stderr, "\nОграничение нагрузки:\n")
-		fmt.Fprintf(os.Stderr, "  - Целевая загрузка CPU: %d%%\n", TARGET_CPU_PERCENT)
-		fmt.Fprintf(os.Stderr, "  - Максимум параллельных конвертаций: %d\n", MAX_WORKERS)
-		fmt.Fprintf(os.Stderr, "  - Nice level: %d (низкий приоритет)\n", NICE_LEVEL)
+		fmt.Fprintf(os.Stderr, "  - Целевая загрузка CPU: %d%%\n", targetCpuPercent)
+		fmt.Fprintf(os.Stderr, "  - Максимум параллельных конвертаций: %d\n", maxWorkers)
+		fmt.Fprintf(os.Stderr, "  - Nice level: %d (низкий приоритет)\n", niceLevel)
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -188,12 +188,12 @@ func main() {
 	threadsPerWorker := calculateThreadsPerWorker(numCPU)
 
 	fmt.Printf("Начинаем обработку каталога: %s\n", rootPath)
-	fmt.Printf("Поиск файлов с расширениями: %s\n", SOURCE_EXTENSIONS)
+	fmt.Printf("Поиск файлов с расширениями: %s\n", sourceExtensions)
 	fmt.Printf("Количество CPU ядер: %d\n", numCPU)
-	fmt.Printf("Целевая загрузка CPU: %d%% (≈%d ядер)\n", TARGET_CPU_PERCENT, numCPU*TARGET_CPU_PERCENT/100)
-	fmt.Printf("Параллельных конвертаций: %d\n", MAX_WORKERS)
+	fmt.Printf("Целевая загрузка CPU: %d%% (≈%d ядер)\n", targetCpuPercent, numCPU*targetCpuPercent/100)
+	fmt.Printf("Параллельных конвертаций: %d\n", maxWorkers)
 	fmt.Printf("Потоков на процесс ffmpeg: %d\n", threadsPerWorker)
-	fmt.Printf("Nice level: %d\n\n", NICE_LEVEL)
+	fmt.Printf("Nice level: %d\n\n", niceLevel)
 
 	// Поиск видео файлов
 	files, err := findVideoFiles(rootPath)
@@ -222,13 +222,13 @@ func main() {
 // calculateThreadsPerWorker рассчитывает количество потоков для каждого ffmpeg
 func calculateThreadsPerWorker(numCPU int) int {
 	// Общее количество потоков = (процент CPU / 100) * количество ядер
-	totalThreads := (TARGET_CPU_PERCENT * numCPU) / 100
+	totalThreads := (targetCpuPercent * numCPU) / 100
 	if totalThreads < 1 {
 		totalThreads = 1
 	}
 
 	// Потоков на воркер = общее / количество воркеров
-	threadsPerWorker := totalThreads / MAX_WORKERS
+	threadsPerWorker := totalThreads / maxWorkers
 	if threadsPerWorker < 1 {
 		threadsPerWorker = 1
 	}
@@ -246,7 +246,7 @@ func checkFFmpeg() error {
 // findVideoFiles рекурсивно ищет видео файлы в указанном каталоге
 func findVideoFiles(rootPath string) ([]VideoFile, error) {
 	var files []VideoFile
-	extensions := strings.Split(SOURCE_EXTENSIONS, ",")
+	extensions := strings.Split(sourceExtensions, ",")
 
 	err := filepath.Walk(rootPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -257,7 +257,7 @@ func findVideoFiles(rootPath string) ([]VideoFile, error) {
 		// Пропускаем каталоги
 		if info.IsDir() {
 			// Пропускаем каталоги с конвертированными файлами
-			if info.Name() == CONVERTED_DIR {
+			if info.Name() == convertedDir {
 				return filepath.SkipDir
 			}
 			return nil
@@ -285,7 +285,7 @@ func findVideoFiles(rootPath string) ([]VideoFile, error) {
 
 // processFiles обрабатывает список файлов с ограничением параллельности
 func processFiles(files []VideoFile, pm *ProcessManager, threadsPerWorker int) error {
-	semaphore := make(chan struct{}, MAX_WORKERS)
+	semaphore := make(chan struct{}, maxWorkers)
 
 	successCount := 0
 	skipCount := 0
@@ -371,7 +371,7 @@ func processFile(file VideoFile, pm *ProcessManager, threadsPerWorker int) int {
 	}
 
 	// Создаем путь для выходного файла
-	convertedDir := filepath.Join(file.sourceDir, CONVERTED_DIR)
+	convertedDir := filepath.Join(file.sourceDir, convertedDir)
 
 	// Создаем каталог converted если его нет
 	if err := os.MkdirAll(convertedDir, 0755); err != nil {
@@ -381,7 +381,7 @@ func processFile(file VideoFile, pm *ProcessManager, threadsPerWorker int) int {
 
 	// Формируем имя выходного файла
 	nameWithoutExt := strings.TrimSuffix(file.fileName, filepath.Ext(file.fileName))
-	outputFileName := nameWithoutExt + OUTPUT_EXTENSION
+	outputFileName := nameWithoutExt + outputExtension
 	outputPath := filepath.Join(convertedDir, outputFileName)
 
 	// Проверяем, существует ли уже конвертированный файл
@@ -426,7 +426,7 @@ func processFile(file VideoFile, pm *ProcessManager, threadsPerWorker int) int {
 	} else {
 		// На Unix-подобных системах используем nice
 		cmd = exec.Command("nice",
-			"-n", strconv.Itoa(NICE_LEVEL),
+			"-n", strconv.Itoa(niceLevel),
 			"ffmpeg",
 			"-i", file.sourcePath,
 			"-threads", strconv.Itoa(threadsPerWorker),
