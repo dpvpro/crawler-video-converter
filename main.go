@@ -293,12 +293,13 @@ func processFiles(files []VideoFile, pm *ProcessManager, threadsPerWorker int) e
 	canceledCount := 0
 	var mu sync.Mutex
 
+fileLoop:
 	for _, file := range files {
 		// Проверяем, не был ли процесс прерван
 		select {
 		case <-pm.ctx.Done():
 			canceledCount = len(files) - successCount - skipCount - errorCount
-			break
+			break fileLoop
 		default:
 		}
 
@@ -360,6 +361,13 @@ func processFile(file VideoFile, pm *ProcessManager, threadsPerWorker int) int {
 	case <-pm.ctx.Done():
 		return 3
 	default:
+	}
+
+	// Получаем информацию об оригинальном файле для сохранения даты
+	sourceInfo, err := os.Stat(file.sourcePath)
+	if err != nil {
+		log.Printf("[ОШИБКА] Не удалось получить информацию о файле %s: %v", file.fileName, err)
+		return 2
 	}
 
 	// Создаем путь для выходного файла
@@ -440,7 +448,7 @@ func processFile(file VideoFile, pm *ProcessManager, threadsPerWorker int) int {
 	cmd.Stderr = os.Stdout
 
 	// Запускаем команду
-	err := cmd.Start()
+	err = cmd.Start()
 	if err != nil {
 		log.Printf("[ОШИБКА] Не удалось запустить ffmpeg для %s: %v", file.fileName, err)
 		cleanup()
@@ -498,6 +506,12 @@ func processFile(file VideoFile, pm *ProcessManager, threadsPerWorker int) int {
 
 	// Удаляем маркер неполного файла - конвертация успешна
 	os.Remove(incompleteMarker)
+
+	// Устанавливаем дату модификации как у оригинального файла
+	if err := os.Chtimes(outputPath, time.Now(), sourceInfo.ModTime()); err != nil {
+		log.Printf("[ПРЕДУПРЕЖДЕНИЕ] Не удалось установить дату для %s: %v", outputFileName, err)
+		// Не считаем это критической ошибкой, файл конвертирован успешно
+	}
 
 	fmt.Printf("[ГОТОВО] %s -> %s\n", file.fileName, outputFileName)
 	return 0
