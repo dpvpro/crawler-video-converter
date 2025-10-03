@@ -95,11 +95,7 @@ func (pm *ProcessManager) Shutdown() {
 	for pid, cmd := range pm.processes {
 		if cmd.Process != nil {
 			fmt.Printf("  Отправка SIGTERM процессу PID=%d\n", pid)
-			if runtime.GOOS != "windows" {
-				cmd.Process.Signal(syscall.SIGTERM)
-			} else {
-				cmd.Process.Kill()
-			}
+			cmd.Process.Kill()
 		}
 	}
 	pm.mu.Unlock()
@@ -180,7 +176,7 @@ func main() {
 
 	// Проверка наличия ffmpeg
 	if err := checkFFmpeg(); err != nil {
-		log.Fatalf("Ошибка: ffmpeg не найден или не доступен: %v\nУстановите ffmpeg: https://ffmpeg.org/download.html", err)
+		log.Fatalf("Ошибка: ffmpeg не найден или не доступен: %v\n", err)
 	}
 
 	// Расчет параметров CPU
@@ -410,35 +406,20 @@ func processFile(file VideoFile, pm *ProcessManager, threadsPerWorker int) int {
 
 	// Запускаем ffmpeg с ограничением потоков
 	var cmd *exec.Cmd
-	if runtime.GOOS == "windows" {
-		// На Windows nice не доступен
-		cmd = exec.Command("ffmpeg",
-			"-i", file.sourcePath,
-			"-threads", strconv.Itoa(threadsPerWorker),
-			"-c:v", "libsvtav1",
-			"-crf", "25",
-			"-preset", "8",
-			"-svtav1-params", "lp="+strconv.Itoa(threadsPerWorker),
-			"-c:a", "aac",
-			"-b:a", "128k",
-			outputPath,
-		)
-	} else {
-		// На Unix-подобных системах используем nice
-		cmd = exec.Command("nice",
-			"-n", strconv.Itoa(niceLevel),
-			"ffmpeg",
-			"-i", file.sourcePath,
-			"-threads", strconv.Itoa(threadsPerWorker),
-			"-c:v", "libsvtav1",
-			"-crf", "25",
-			"-preset", "8",
-			"-svtav1-params", "lp="+strconv.Itoa(threadsPerWorker),
-			"-c:a", "aac",
-			"-b:a", "128k",
-			outputPath,
-		)
-	}
+	// На Unix-подобных системах используем nice
+	cmd = exec.Command("nice",
+		"-n", strconv.Itoa(niceLevel),
+		"ffmpeg",
+		"-i", file.sourcePath,
+		"-threads", strconv.Itoa(threadsPerWorker),
+		"-c:v", "libsvtav1",
+		"-crf", "25",
+		"-preset", "8",
+		"-svtav1-params", "lp="+strconv.Itoa(threadsPerWorker),
+		"-c:a", "aac",
+		"-b:a", "128k",
+		outputPath,
+	)
 
 	// Перенаправляем вывод ffmpeg (можно включить для отладки)
 	// cmd.Stdout = nil
