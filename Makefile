@@ -1,104 +1,93 @@
 # Makefile для Video Converter
 
-# Переменные
-BINARY_NAME=video-converter
+BINARY_NAME=crawler-video-converter
 GO=go
 GOFLAGS=-ldflags="-s -w"
 INSTALL_PATH=/usr/local/bin
 
-# Цвета для вывода
-GREEN=\033[0;32m
-YELLOW=\033[1;33m
-NC=\033[0m # No Color
-
 .PHONY: all build clean run install uninstall test help
 
-# Цель по умолчанию
 all: build
 
-# Сборка программы
 build:
-	@echo "$(GREEN)Building $(BINARY_NAME)...$(NC)"
+	@echo "Building $(BINARY_NAME)..."
 	$(GO) build $(GOFLAGS) -o $(BINARY_NAME) .
-	@echo "$(GREEN)Build complete!$(NC)"
+	@echo "Build complete!"
 
-# Сборка для разных платформ
 build-all: build-linux build-windows build-darwin
 
 build-linux:
-	@echo "$(GREEN)Building for Linux...$(NC)"
+	@echo "Building for Linux..."
 	GOOS=linux GOARCH=amd64 $(GO) build $(GOFLAGS) -o $(BINARY_NAME)-linux-amd64 .
 	GOOS=linux GOARCH=arm64 $(GO) build $(GOFLAGS) -o $(BINARY_NAME)-linux-arm64 .
 
 build-windows:
-	@echo "$(GREEN)Building for Windows...$(NC)"
+	@echo "Building for Windows..."
 	GOOS=windows GOARCH=amd64 $(GO) build $(GOFLAGS) -o $(BINARY_NAME)-windows-amd64.exe .
 
 build-darwin:
-	@echo "$(GREEN)Building for macOS...$(NC)"
+	@echo "Building for macOS..."
 	GOOS=darwin GOARCH=amd64 $(GO) build $(GOFLAGS) -o $(BINARY_NAME)-darwin-amd64 .
 	GOOS=darwin GOARCH=arm64 $(GO) build $(GOFLAGS) -o $(BINARY_NAME)-darwin-arm64 .
 
-# Запуск программы (для тестирования)
 run: build
 	@if [ -z "$(PATH_ARG)" ]; then \
-		echo "$(YELLOW)Usage: make run PATH_ARG=/path/to/videos$(NC)"; \
+		echo "Usage: make run PATH_ARG=/path/to/videos"; \
 		./$(BINARY_NAME); \
 	else \
 		./$(BINARY_NAME) $(PATH_ARG); \
 	fi
 
-# Установка в систему
 install: build
-	@echo "$(GREEN)Installing $(BINARY_NAME) to $(INSTALL_PATH)...$(NC)"
+	@echo "Installing $(BINARY_NAME) to $(INSTALL_PATH)..."
 	@sudo cp $(BINARY_NAME) $(INSTALL_PATH)/
 	@sudo chmod +x $(INSTALL_PATH)/$(BINARY_NAME)
-	@echo "$(GREEN)Installation complete!$(NC)"
-	@echo "$(YELLOW)You can now run '$(BINARY_NAME)' from anywhere$(NC)"
+	@echo "Installation complete!"
+	@echo "You can now run '$(BINARY_NAME)' from anywhere"
 
 # Удаление из системы
 uninstall:
-	@echo "$(GREEN)Uninstalling $(BINARY_NAME) from $(INSTALL_PATH)...$(NC)"
+	@echo "Uninstalling $(BINARY_NAME) from $(INSTALL_PATH)..."
 	@sudo rm -f $(INSTALL_PATH)/$(BINARY_NAME)
-	@echo "$(GREEN)Uninstallation complete!$(NC)"
+	@echo "Uninstallation complete!"
 
 # Очистка собранных файлов
 clean:
-	@echo "$(GREEN)Cleaning up...$(NC)"
+	@echo "Cleaning up..."
 	@rm -f $(BINARY_NAME)
 	@rm -f $(BINARY_NAME)-*
-	@echo "$(GREEN)Clean complete!$(NC)"
+	@echo "Clean complete!"
 
 # Форматирование кода
 fmt:
-	@echo "$(GREEN)Formatting code...$(NC)"
+	@echo "Formatting code..."
 	$(GO) fmt ./...
 
 # Проверка кода
 vet:
-	@echo "$(GREEN)Vetting code...$(NC)"
+	@echo "Vetting code..."
 	$(GO) vet ./...
 
 # Загрузка зависимостей
 deps:
-	@echo "$(GREEN)Downloading dependencies...$(NC)"
+	@echo "Downloading dependencies..."
 	$(GO) mod download
 	$(GO) mod tidy
 
 # Тестирование
 test:
-	@echo "$(GREEN)Running tests...$(NC)"
+	@echo "Running tests..."
 	$(GO) test -v ./...
 
 # Проверка наличия ffmpeg
 check-ffmpeg:
-	@echo "$(GREEN)Checking FFmpeg installation...$(NC)"
+	@echo "Checking FFmpeg installation..."
 	@if command -v ffmpeg >/dev/null 2>&1; then \
-		echo "$(GREEN)✓ FFmpeg is installed$(NC)"; \
+		echo "✓ FFmpeg is installed"; \
 		ffmpeg -version | head -n1; \
 	else \
-		echo "$(YELLOW)✗ FFmpeg is not installed$(NC)"; \
-		echo "$(YELLOW)Please install FFmpeg first:$(NC)"; \
+		echo "✗ FFmpeg is not installed"; \
+		echo "Please install FFmpeg first:"; \
 		echo "  Ubuntu/Debian: sudo apt install ffmpeg"; \
 		echo "  macOS: brew install ffmpeg"; \
 		echo "  Windows: Download from https://ffmpeg.org/download.html"; \
@@ -107,26 +96,26 @@ check-ffmpeg:
 
 # Полная проверка перед использованием
 check: check-ffmpeg vet fmt
-	@echo "$(GREEN)All checks passed!$(NC)"
+	@echo "All checks passed!"
 
 # Помощь
 help:
-	@echo "$(GREEN)Available targets:$(NC)"
-	@echo "  $(YELLOW)build$(NC)        - Build the binary"
-	@echo "  $(YELLOW)build-all$(NC)    - Build for all platforms (Linux, Windows, macOS)"
-	@echo "  $(YELLOW)run$(NC)          - Build and run (use PATH_ARG=/path/to/videos)"
-	@echo "  $(YELLOW)install$(NC)      - Install to system (/usr/local/bin)"
-	@echo "  $(YELLOW)uninstall$(NC)    - Remove from system"
-	@echo "  $(YELLOW)clean$(NC)        - Remove built binaries"
-	@echo "  $(YELLOW)fmt$(NC)          - Format Go code"
-	@echo "  $(YELLOW)vet$(NC)          - Vet Go code"
-	@echo "  $(YELLOW)deps$(NC)         - Download and tidy dependencies"
-	@echo "  $(YELLOW)test$(NC)         - Run tests"
-	@echo "  $(YELLOW)check-ffmpeg$(NC) - Check if FFmpeg is installed"
-	@echo "  $(YELLOW)check$(NC)        - Run all checks"
-	@echo "  $(YELLOW)help$(NC)         - Show this help message"
+	@echo "Available targets:"
+	@echo "  build         - Build the binary"
+	@echo "  build-all     - Build for all platforms (Linux, Windows, macOS)"
+	@echo "  run           - Build and run (use PATH_ARG=/path/to/videos)"
+	@echo "  install       - Install to system (/usr/local/bin)"
+	@echo "  uninstall     - Remove from system"
+	@echo "  clean         - Remove built binaries"
+	@echo "  fmt           - Format Go code"
+	@echo "  vet           - Vet Go code"
+	@echo "  deps          - Download and tidy dependencies"
+	@echo "  test          - Run tests"
+	@echo "  check-ffmpeg  - Check if FFmpeg is installed"
+	@echo "  check         - Run all checks"
+	@echo "  help          - Show this help message"
 	@echo ""
-	@echo "$(GREEN)Examples:$(NC)"
+	@echo "Examples:"
 	@echo "  make build"
 	@echo "  make run PATH_ARG=/home/user/videos"
 	@echo "  make install"
