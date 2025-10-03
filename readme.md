@@ -117,6 +117,8 @@ cmd := exec.Command("ffmpeg",
 
 ## Структура каталогов
 
+## Структура результатов
+
 ```
 videos/
 ├── video1.MOV
@@ -124,6 +126,7 @@ videos/
 ├── converted/          # Создается автоматически
 │   ├── video1.mkv
 │   └── video2.mkv
+│   └── video3.mkv.incomplete  # Маркер неполного файла (удаляется после успешной конвертации)
 └── subfolder/
     ├── video3.avi
     └── converted/      # Создается автоматически
