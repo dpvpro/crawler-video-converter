@@ -17,43 +17,35 @@ import (
 	"time"
 )
 
+// Константы программы
 const (
-	// Расширения файлов для поиска (через запятую)
+	// Расширения исходных видео файлов
 	// sourceExtensions = ".mov,.mp4,.avi"
 	sourceExtensions = ".mov"
 	// Выходное расширение
 	outputExtension = ".mkv"
 	// Имя каталога для конвертированных файлов
 	convertedDir = "converted"
-
-	// === КОНТРОЛЬ ЗАГРУЗКИ CPU ===
-	// Целевая суммарная загрузка CPU в процентах
-	// 50 = использовать 50% от всех ядер
-	// 100 = использовать все ядра
-	targetCpuPercent = 20
-
-	// Максимальное количество одновременных конвертаций
-	// Рассчитывается динамически на основе targetCpuPercent
-	maxWorkers = 1
-
+	// Целевая загрузка CPU в процентах
+	targetCpuPercent = 10
 	// Nice level для процессов ffmpeg (0-19, больше = ниже приоритет)
 	niceLevel = 19
 )
 
-// VideoFile представляет видео файл для конвертации
+// VideoFile представляет видео файл для обработки
 type VideoFile struct {
-	sourcePath string
-	sourceDir  string
-	fileName   string
+	sourcePath string // Полный путь к исходному файлу
+	sourceDir  string // Каталог исходного файла
+	fileName   string // Имя файла с расширением
 }
 
-// ProcessManager управляет процессами конвертации
+// ProcessManager управляет процессами и обеспечивает корректное завершение
 type ProcessManager struct {
 	ctx       context.Context
 	cancel    context.CancelFunc
-	processes map[int]*exec.Cmd
+	processes map[*exec.Cmd]bool
 	mu        sync.Mutex
-	wg        *sync.WaitGroup
+	wg        sync.WaitGroup
 }
 
 // NewProcessManager создает новый менеджер процессов
@@ -62,45 +54,40 @@ func NewProcessManager() *ProcessManager {
 	return &ProcessManager{
 		ctx:       ctx,
 		cancel:    cancel,
-		processes: make(map[int]*exec.Cmd),
-		wg:        &sync.WaitGroup{},
+		processes: make(map[*exec.Cmd]bool),
 	}
 }
 
-// RegisterProcess регистрирует новый процесс
+// RegisterProcess регистрирует процесс для отслеживания
 func (pm *ProcessManager) RegisterProcess(cmd *exec.Cmd) {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
-	if cmd.Process != nil {
-		pm.processes[cmd.Process.Pid] = cmd
-	}
+	pm.processes[cmd] = true
 }
 
-// UnregisterProcess удаляет процесс из реестра
-func (pm *ProcessManager) UnregisterProcess(pid int) {
+// UnregisterProcess удаляет процесс из отслеживания
+func (pm *ProcessManager) UnregisterProcess(cmd *exec.Cmd) {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
-	delete(pm.processes, pid)
+	delete(pm.processes, cmd)
 }
 
 // Shutdown корректно завершает все процессы
 func (pm *ProcessManager) Shutdown() {
-	fmt.Println("\n[ЗАВЕРШЕНИЕ] Получен сигнал прерывания, останавливаем конвертацию...")
-
-	// Отменяем контекст
+	fmt.Println("\n[ЗАВЕРШЕНИЕ] Завершаем работу...")
 	pm.cancel()
 
-	// Отправляем SIGTERM всем процессам
+	// Сначала пытаемся корректно завершить процессы
 	pm.mu.Lock()
-	for pid, cmd := range pm.processes {
+	for cmd := range pm.processes {
 		if cmd.Process != nil {
-			fmt.Printf("  Отправка SIGTERM процессу PID=%d\n", pid)
-			cmd.Process.Kill()
+			fmt.Printf("[ЗАВЕРШЕНИЕ] Останавливаем процесс PID %d\n", cmd.Process.Pid)
+			cmd.Process.Signal(os.Interrupt)
 		}
 	}
 	pm.mu.Unlock()
 
-	// Даем процессам время на корректное завершение
+	// Ждем завершения с таймаутом
 	done := make(chan struct{})
 	go func() {
 		pm.wg.Wait()
@@ -109,22 +96,17 @@ func (pm *ProcessManager) Shutdown() {
 
 	select {
 	case <-done:
-		fmt.Println("[ЗАВЕРШЕНИЕ] Все процессы завершены корректно")
+		fmt.Println("[ЗАВЕРШЕНИЕ] Все процессы корректно завершены")
 	case <-time.After(10 * time.Second):
-		fmt.Println("[ЗАВЕРШЕНИЕ] Принудительная остановка процессов...")
+		fmt.Println("[ЗАВЕРШЕНИЕ] Таймаут, принудительное завершение")
 		pm.mu.Lock()
-		for pid, cmd := range pm.processes {
+		for cmd := range pm.processes {
 			if cmd.Process != nil {
-				fmt.Printf("  Принудительная остановка процесса PID=%d\n", pid)
 				cmd.Process.Kill()
 			}
 		}
 		pm.mu.Unlock()
-		time.Sleep(1 * time.Second)
 	}
-
-	// Удаляем незавершенные файлы
-	cleanupIncompleteFiles()
 }
 
 func main() {
@@ -150,7 +132,6 @@ func main() {
 		fmt.Fprintf(os.Stderr, "\nРезультаты сохраняются в подкаталог '%s' рядом с исходными файлами.\n", convertedDir)
 		fmt.Fprintf(os.Stderr, "\nОграничение нагрузки:\n")
 		fmt.Fprintf(os.Stderr, "  - Целевая загрузка CPU: %d%%\n", targetCpuPercent)
-		fmt.Fprintf(os.Stderr, "  - Максимум параллельных конвертаций: %d\n", maxWorkers)
 		fmt.Fprintf(os.Stderr, "  - Nice level: %d (низкий приоритет)\n", niceLevel)
 		flag.PrintDefaults()
 	}
@@ -187,7 +168,6 @@ func main() {
 	fmt.Printf("Поиск файлов с расширениями: %s\n", sourceExtensions)
 	fmt.Printf("Количество CPU ядер: %d\n", numCPU)
 	fmt.Printf("Целевая загрузка CPU: %d%% (≈%d ядер)\n", targetCpuPercent, numCPU*targetCpuPercent/100)
-	fmt.Printf("Параллельных конвертаций: %d\n", maxWorkers)
 	fmt.Printf("Потоков на процесс ffmpeg: %d\n", threadsPerWorker)
 	fmt.Printf("Nice level: %d\n\n", niceLevel)
 
@@ -204,7 +184,7 @@ func main() {
 
 	fmt.Printf("Найдено %d файлов для обработки\n\n", len(files))
 
-	// Обработка файлов с ограничением параллельности
+	// Обработка файлов последовательно
 	err = processFiles(files, pm, threadsPerWorker)
 	if err != nil {
 		if err == context.Canceled {
@@ -215,27 +195,18 @@ func main() {
 	}
 }
 
-// calculateThreadsPerWorker рассчитывает количество потоков для каждого ffmpeg
+// calculateThreadsPerWorker рассчитывает количество потоков для одного процесса ffmpeg
 func calculateThreadsPerWorker(numCPU int) int {
-	// Общее количество потоков = (процент CPU / 100) * количество ядер
-	totalThreads := (targetCpuPercent * numCPU) / 100
-	if totalThreads < 1 {
-		totalThreads = 1
+	threads := (numCPU * targetCpuPercent) / 100
+	if threads < 1 {
+		threads = 1
 	}
-
-	// Потоков на воркер = общее / количество воркеров
-	threadsPerWorker := totalThreads / maxWorkers
-	if threadsPerWorker < 1 {
-		threadsPerWorker = 1
-	}
-
-	return threadsPerWorker
+	return threads
 }
 
-// checkFFmpeg проверяет доступность ffmpeg
+// checkFFmpeg проверяет наличие ffmpeg в системе
 func checkFFmpeg() error {
-	cmd := exec.Command("ffmpeg", "-version")
-	err := cmd.Run()
+	_, err := exec.LookPath("ffmpeg")
 	return err
 }
 
@@ -246,28 +217,20 @@ func findVideoFiles(rootPath string) ([]VideoFile, error) {
 
 	err := filepath.Walk(rootPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			log.Printf("Предупреждение: ошибка доступа к %s: %v", path, err)
-			return nil // Продолжаем обход
+			return err
 		}
 
-		// Пропускаем каталоги
 		if info.IsDir() {
-			// Пропускаем каталоги с конвертированными файлами
-			if info.Name() == convertedDir {
-				return filepath.SkipDir
-			}
 			return nil
 		}
 
-		// Проверяем расширение файла
-		for _, ext := range extensions {
-			if strings.HasSuffix(strings.ToLower(path), strings.ToLower(ext)) {
-				dir := filepath.Dir(path)
-				base := filepath.Base(path)
+		ext := strings.ToLower(filepath.Ext(path))
+		for _, allowedExt := range extensions {
+			if ext == strings.ToLower(allowedExt) {
 				files = append(files, VideoFile{
 					sourcePath: path,
-					sourceDir:  dir,
-					fileName:   base,
+					sourceDir:  filepath.Dir(path),
+					fileName:   filepath.Base(path),
 				})
 				break
 			}
@@ -279,61 +242,35 @@ func findVideoFiles(rootPath string) ([]VideoFile, error) {
 	return files, err
 }
 
-// processFiles обрабатывает список файлов с ограничением параллельности
+// processFiles обрабатывает файлы последовательно
 func processFiles(files []VideoFile, pm *ProcessManager, threadsPerWorker int) error {
-	semaphore := make(chan struct{}, maxWorkers)
-
 	successCount := 0
 	skipCount := 0
 	errorCount := 0
 	canceledCount := 0
-	var mu sync.Mutex
 
-fileLoop:
 	for _, file := range files {
 		// Проверяем, не был ли процесс прерван
-		select {
-		case <-pm.ctx.Done():
+		if pm.ctx.Err() != nil {
 			canceledCount = len(files) - successCount - skipCount - errorCount
-			break fileLoop
-		default:
+			break
 		}
 
 		pm.wg.Add(1)
-		semaphore <- struct{}{} // Захватываем слот
+		result := processFile(file, pm, threadsPerWorker)
+		pm.wg.Done()
 
-		go func(f VideoFile) {
-			defer pm.wg.Done()
-			defer func() { <-semaphore }() // Освобождаем слот
-
-			// Восстановление после паники
-			defer func() {
-				if r := recover(); r != nil {
-					log.Printf("[ПАНИКА] При обработке %s: %v", f.fileName, r)
-					mu.Lock()
-					errorCount++
-					mu.Unlock()
-				}
-			}()
-
-			result := processFile(f, pm, threadsPerWorker)
-
-			mu.Lock()
-			switch result {
-			case 0:
-				successCount++
-			case 1:
-				skipCount++
-			case 2:
-				errorCount++
-			case 3:
-				canceledCount++
-			}
-			mu.Unlock()
-		}(file)
+		switch result {
+		case 0:
+			successCount++
+		case 1:
+			skipCount++
+		case 2:
+			errorCount++
+		case 3:
+			canceledCount++
+		}
 	}
-
-	pm.wg.Wait()
 
 	fmt.Printf("\n===== Результаты обработки =====\n")
 	fmt.Printf("Успешно конвертировано: %d\n", successCount)
@@ -349,8 +286,7 @@ fileLoop:
 	return nil
 }
 
-// processFile обрабатывает один файл
-// Возвращает: 0 - успех, 1 - пропущен, 2 - ошибка, 3 - отменен
+// processFile обрабатывает один видео файл
 func processFile(file VideoFile, pm *ProcessManager, threadsPerWorker int) int {
 	// Проверяем контекст перед началом
 	select {
@@ -421,10 +357,7 @@ func processFile(file VideoFile, pm *ProcessManager, threadsPerWorker int) int {
 		outputPath,
 	)
 
-	// Перенаправляем вывод ffmpeg (можно включить для отладки)
-	// cmd.Stdout = nil
-	// cmd.Stderr = nil
-
+	// Перенаправляем вывод ffmpeg
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stdout
 
@@ -448,75 +381,59 @@ func processFile(file VideoFile, pm *ProcessManager, threadsPerWorker int) int {
 	select {
 	case <-pm.ctx.Done():
 		// Контекст отменен, останавливаем процесс
-		fmt.Printf("[ОТМЕНА] Остановка конвертации: %s\n", file.fileName)
 		if cmd.Process != nil {
-			cmd.Process.Kill()
-			pm.UnregisterProcess(cmd.Process.Pid)
+			cmd.Process.Signal(os.Interrupt)
+		}
+		// Ждем завершения с таймаутом
+		select {
+		case <-done:
+			// Процесс завершился сам
+		case <-time.After(5 * time.Second):
+			if cmd.Process != nil {
+				cmd.Process.Kill()
+			}
 		}
 		cleanup()
+		pm.UnregisterProcess(cmd)
 		return 3
+
 	case err := <-done:
 		// Процесс завершился
-		if cmd.Process != nil {
-			pm.UnregisterProcess(cmd.Process.Pid)
-		}
+		pm.UnregisterProcess(cmd)
 
 		if err != nil {
-			// Проверяем, была ли это отмена
-			if pm.ctx.Err() != nil {
-				cleanup()
-				return 3
-			}
-			// Проверяем код выхода
-			if exitErr, ok := err.(*exec.ExitError); ok {
-				log.Printf("[ОШИБКА] ffmpeg завершился с кодом %d для файла %s", exitErr.ExitCode(), file.fileName)
-			} else {
-				log.Printf("[ОШИБКА] %s: %v", file.fileName, err)
-			}
+			log.Printf("[ОШИБКА] Ошибка конвертации %s: %v", file.fileName, err)
 			cleanup()
 			return 2
 		}
+
+		// Удаляем маркер неполного файла
+		if err := os.Remove(incompleteMarker); err != nil {
+			log.Printf("[ПРЕДУПРЕЖДЕНИЕ] Не удалось удалить маркер для %s: %v", file.fileName, err)
+		}
+
+		// Сохраняем оригинальную дату файла
+		if err := os.Chtimes(outputPath, sourceInfo.ModTime(), sourceInfo.ModTime()); err != nil {
+			log.Printf("[ПРЕДУПРЕЖДЕНИЕ] Не удалось сохранить дату файла %s: %v", file.fileName, err)
+		}
+
+		fmt.Printf("[УСПЕХ] %s -> %s\n", file.fileName, outputFileName)
+		return 0
 	}
-
-	// Проверяем, что файл создан и не пустой
-	if info, err := os.Stat(outputPath); err != nil || info.Size() == 0 {
-		log.Printf("[ОШИБКА] %s: выходной файл пустой или не создан", file.fileName)
-		cleanup()
-		return 2
-	}
-
-	// Удаляем маркер неполного файла - конвертация успешна
-	os.Remove(incompleteMarker)
-
-	// Устанавливаем дату модификации как у оригинального файла
-	if err := os.Chtimes(outputPath, time.Now(), sourceInfo.ModTime()); err != nil {
-		log.Printf("[ПРЕДУПРЕЖДЕНИЕ] Не удалось установить дату для %s: %v", outputFileName, err)
-		// Не считаем это критической ошибкой, файл конвертирован успешно
-	}
-
-	fmt.Printf("[ГОТОВО] %s -> %s\n", file.fileName, outputFileName)
-	return 0
 }
 
-// cleanupIncompleteFiles удаляет неполные файлы конвертации
-func cleanupIncompleteFiles() {
-	incompleteCount := 0
-	filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
+// cleanupIncompleteFiles удаляет маркеры неполных файлов при запуске
+func cleanupIncompleteFiles(rootPath string) {
+	filepath.Walk(rootPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
 		}
+
 		if !info.IsDir() && strings.HasSuffix(path, ".incomplete") {
-			// Удаляем маркер и соответствующий файл
-			videoPath := strings.TrimSuffix(path, ".incomplete")
-			if _, err := os.Stat(videoPath); err == nil {
-				os.Remove(videoPath)
-				incompleteCount++
-			}
 			os.Remove(path)
+			fmt.Printf("[ОЧИСТКА] Удален маркер неполного файла: %s\n", filepath.Base(path))
 		}
+
 		return nil
 	})
-	if incompleteCount > 0 {
-		fmt.Printf("[ОЧИСТКА] Удалено неполных файлов: %d\n", incompleteCount)
-	}
 }
