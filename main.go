@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -26,10 +25,10 @@ const (
 	outputExtension = ".mkv"
 	// Имя каталога для конвертированных файлов
 	convertedDir = "converted"
-	// Целевая загрузка CPU в процентах
-	targetCpuPercent = 10
 	// Nice level для процессов ffmpeg (0-19, больше = ниже приоритет)
-	niceLevel = 19
+	niceLevel = 10
+	// Количество потоков ffmpeg по умолчанию
+	defaultThreads = 2
 )
 
 // VideoFile представляет видео файл для обработки
@@ -125,15 +124,20 @@ func main() {
 	}()
 
 	// Парсинг аргументов командной строки
+	var threads int
+	flag.IntVar(&threads, "threads", defaultThreads, "Количество потоков для ffmpeg")
+	flag.IntVar(&threads, "t", defaultThreads, "Количество потоков для ffmpeg (сокращенная форма)")
+
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Использование: %s <путь_к_каталогу>\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Использование: %s [опции] <путь_к_каталогу>\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "\nПрограмма рекурсивно обходит указанный каталог, находит видео файлы\n")
 		fmt.Fprintf(os.Stderr, "с расширениями %s и конвертирует их в формат MKV с кодеком AV1.\n", sourceExtensions)
 		fmt.Fprintf(os.Stderr, "\nРезультаты сохраняются в подкаталог '%s' рядом с исходными файлами.\n", convertedDir)
-		fmt.Fprintf(os.Stderr, "\nОграничение нагрузки:\n")
-		fmt.Fprintf(os.Stderr, "  - Целевая загрузка CPU: %d%%\n", targetCpuPercent)
-		fmt.Fprintf(os.Stderr, "  - Nice level: %d (низкий приоритет)\n", niceLevel)
+		fmt.Fprintf(os.Stderr, "\nОпции:\n")
 		flag.PrintDefaults()
+		fmt.Fprintf(os.Stderr, "\nОграничение нагрузки:\n")
+		fmt.Fprintf(os.Stderr, "  - Потоков ffmpeg: %d (по умолчанию)\n", defaultThreads)
+		fmt.Fprintf(os.Stderr, "  - Nice level: %d (низкий приоритет)\n", niceLevel)
 	}
 	flag.Parse()
 
@@ -141,6 +145,12 @@ func main() {
 	if flag.NArg() < 1 {
 		fmt.Fprintf(os.Stderr, "Ошибка: не указан путь к каталогу\n\n")
 		flag.Usage()
+		os.Exit(1)
+	}
+
+	// Проверка корректности количества потоков
+	if threads < 1 {
+		fmt.Fprintf(os.Stderr, "Ошибка: количество потоков должно быть положительным числом\n")
 		os.Exit(1)
 	}
 
@@ -160,15 +170,9 @@ func main() {
 		log.Fatalf("Ошибка: ffmpeg не найден или не доступен: %v\n", err)
 	}
 
-	// Расчет параметров CPU
-	numCPU := runtime.NumCPU()
-	threadsPerWorker := calculateThreadsPerWorker(numCPU)
-
 	fmt.Printf("Начинаем обработку каталога: %s\n", rootPath)
 	fmt.Printf("Поиск файлов с расширениями: %s\n", sourceExtensions)
-	fmt.Printf("Количество CPU ядер: %d\n", numCPU)
-	fmt.Printf("Целевая загрузка CPU: %d%% (≈%d ядер)\n", targetCpuPercent, numCPU*targetCpuPercent/100)
-	fmt.Printf("Потоков на процесс ffmpeg: %d\n", threadsPerWorker)
+	fmt.Printf("Потоков ffmpeg: %d\n", threads)
 	fmt.Printf("Nice level: %d\n\n", niceLevel)
 
 	// Поиск видео файлов
@@ -185,7 +189,7 @@ func main() {
 	fmt.Printf("Найдено %d файлов для обработки\n\n", len(files))
 
 	// Обработка файлов последовательно
-	err = processFiles(files, pm, threadsPerWorker)
+	err = processFiles(files, pm, threads)
 	if err != nil {
 		if err == context.Canceled {
 			fmt.Println("\n[ОТМЕНА] Обработка прервана пользователем")
@@ -195,22 +199,13 @@ func main() {
 	}
 }
 
-// calculateThreadsPerWorker рассчитывает количество потоков для одного процесса ffmpeg
-func calculateThreadsPerWorker(numCPU int) int {
-	threads := (numCPU * targetCpuPercent) / 100
-	if threads < 1 {
-		threads = 1
-	}
-	return threads
-}
-
 // checkFFmpeg проверяет наличие ffmpeg в системе
 func checkFFmpeg() error {
 	_, err := exec.LookPath("ffmpeg")
 	return err
 }
 
-// findVideoFiles рекурсивно ищет видео файлы в указанном каталоге
+// findVideoFiles рекурсивно ищет видео файлы в каталоге
 func findVideoFiles(rootPath string) ([]VideoFile, error) {
 	var files []VideoFile
 	extensions := strings.Split(sourceExtensions, ",")
@@ -243,7 +238,7 @@ func findVideoFiles(rootPath string) ([]VideoFile, error) {
 }
 
 // processFiles обрабатывает файлы последовательно
-func processFiles(files []VideoFile, pm *ProcessManager, threadsPerWorker int) error {
+func processFiles(files []VideoFile, pm *ProcessManager, threads int) error {
 	successCount := 0
 	skipCount := 0
 	errorCount := 0
@@ -257,7 +252,7 @@ func processFiles(files []VideoFile, pm *ProcessManager, threadsPerWorker int) e
 		}
 
 		pm.wg.Add(1)
-		result := processFile(file, pm, threadsPerWorker)
+		result := processFile(file, pm, threads)
 		pm.wg.Done()
 
 		switch result {
@@ -287,7 +282,7 @@ func processFiles(files []VideoFile, pm *ProcessManager, threadsPerWorker int) e
 }
 
 // processFile обрабатывает один видео файл
-func processFile(file VideoFile, pm *ProcessManager, threadsPerWorker int) int {
+func processFile(file VideoFile, pm *ProcessManager, threads int) int {
 	// Проверяем контекст перед началом
 	select {
 	case <-pm.ctx.Done():
@@ -322,7 +317,7 @@ func processFile(file VideoFile, pm *ProcessManager, threadsPerWorker int) int {
 		return 1
 	}
 
-	fmt.Printf("[НАЧАЛО] %s (threads=%d)\n", file.fileName, threadsPerWorker)
+	fmt.Printf("[НАЧАЛО] %s (threads=%d)\n", file.fileName, threads)
 
 	// Маркер для неполного файла
 	incompleteMarker := outputPath + ".incomplete"
@@ -347,11 +342,11 @@ func processFile(file VideoFile, pm *ProcessManager, threadsPerWorker int) int {
 		"-n", strconv.Itoa(niceLevel),
 		"ffmpeg",
 		"-i", file.sourcePath,
-		"-threads", strconv.Itoa(threadsPerWorker),
+		"-threads", strconv.Itoa(threads),
 		"-c:v", "libsvtav1",
 		"-crf", "25",
 		"-preset", "8",
-		"-svtav1-params", "lp="+strconv.Itoa(threadsPerWorker),
+		"-svtav1-params", "lp="+strconv.Itoa(threads),
 		"-c:a", "aac",
 		"-b:a", "128k",
 		outputPath,
