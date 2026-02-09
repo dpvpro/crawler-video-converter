@@ -336,9 +336,8 @@ func processFile(file VideoFile, pm *ProcessManager, threads int) int {
 	}
 
 	// Запускаем ffmpeg с ограничением потоков
-	var cmd *exec.Cmd
 	// На Unix-подобных системах используем nice
-	cmd = exec.Command("nice",
+	cmd := exec.Command("nice",
 		"-n", strconv.Itoa(niceLevel),
 		"ffmpeg",
 		"-i", file.sourcePath,
@@ -415,20 +414,4 @@ func processFile(file VideoFile, pm *ProcessManager, threads int) int {
 		fmt.Printf("[УСПЕХ] %s -> %s\n", file.fileName, outputFileName)
 		return 0
 	}
-}
-
-// cleanupIncompleteFiles удаляет маркеры неполных файлов при запуске
-func cleanupIncompleteFiles(rootPath string) {
-	filepath.Walk(rootPath, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil
-		}
-
-		if !info.IsDir() && strings.HasSuffix(path, ".incomplete") {
-			os.Remove(path)
-			fmt.Printf("[ОЧИСТКА] Удален маркер неполного файла: %s\n", filepath.Base(path))
-		}
-
-		return nil
-	})
 }
