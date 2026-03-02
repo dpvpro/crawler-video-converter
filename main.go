@@ -210,7 +210,7 @@ func findVideoFiles(rootPath string) ([]VideoFile, error) {
 	var files []VideoFile
 	extensions := strings.Split(sourceExtensions, ",")
 
-	err := filepath.Walk(rootPath, func(path string, info os.FileInfo, err error) error {
+	walkFunc := func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -232,7 +232,9 @@ func findVideoFiles(rootPath string) ([]VideoFile, error) {
 		}
 
 		return nil
-	})
+	}
+
+	err := filepath.Walk(rootPath, walkFunc)
 
 	return files, err
 }
