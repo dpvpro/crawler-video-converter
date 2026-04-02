@@ -125,8 +125,8 @@ func main() {
 
 	// Парсинг аргументов командной строки
 	var threads int
-	flag.IntVar(&threads, "threads", defaultThreads, "Количество потоков для ffmpeg")
-	flag.IntVar(&threads, "t", defaultThreads, "Количество потоков для ffmpeg (сокращенная форма)")
+	flag.IntVar(&threads, "threads", defaultThreads, "Количество потоков для ffmpeg (full)")
+	flag.IntVar(&threads, "t", defaultThreads, "Количество потоков для ffmpeg (short)")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Использование: %s [опции] <путь_к_каталогу>\n", os.Args[0])
@@ -239,35 +239,52 @@ func findVideoFiles(rootPath string) ([]VideoFile, error) {
 	return files, err
 }
 
-// processFiles обрабатывает файлы последовательно
+// processFiles обрабатывает файлы параллельно с ограничением количества потоков
 func processFiles(files []VideoFile, pm *ProcessManager, threads int) error {
 	successCount := 0
 	skipCount := 0
 	errorCount := 0
 	canceledCount := 0
 
+	// Семафор для ограничения количества параллельных процессов ffmpeg
+	sem := make(chan struct{}, threads)
+	var resultsMu sync.Mutex
+
+	// Запускаем обработку всех файлов
 	for _, file := range files {
-		// Проверяем, не был ли процесс прерван
+		// Проверяем, не был ли контекст отменен
 		if pm.ctx.Err() != nil {
-			canceledCount = len(files) - successCount - skipCount - errorCount
 			break
 		}
 
-		pm.wg.Add(1)
-		result := processFile(file, pm, threads)
-		pm.wg.Done()
+		// Захватываем слот в семафоре
+		sem <- struct{}{}
 
-		switch result {
-		case 0:
-			successCount++
-		case 1:
-			skipCount++
-		case 2:
-			errorCount++
-		case 3:
-			canceledCount++
-		}
+		pm.wg.Add(1)
+		go func(f VideoFile) {
+			defer pm.wg.Done()
+			defer func() { <-sem }() // Освобождаем слот
+
+			result := processFile(f, pm, 1) // 1 поток на каждый ffmpeg
+
+			// Сохраняем результат
+			resultsMu.Lock()
+			switch result {
+			case 0:
+				successCount++
+			case 1:
+				skipCount++
+			case 2:
+				errorCount++
+			case 3:
+				canceledCount++
+			}
+			resultsMu.Unlock()
+		}(file)
 	}
+
+	// Ждем завершения всех процессов
+	pm.wg.Wait()
 
 	fmt.Printf("\n===== Результаты обработки =====\n")
 	fmt.Printf("Успешно конвертировано: %d\n", successCount)
