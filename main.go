@@ -355,20 +355,26 @@ func processFile(file VideoFile, pm *ProcessManager, threads int) int {
 	}
 
 	// Запускаем ffmpeg с ограничением потоков
-	// На Unix-подобных системах используем nice
+	// compability video settings
+	// ffmpeg -i input.mp4 -c:v libx264 -preset superfast -crf 23 -c:a aac -movflags +faststart output.mp4
+	// quality (-crf 23) - sets a target quality level
+	// value of 18–28 is standard. lower numbers mean higher quality but larger files
+
 	cmd := exec.Command("nice",
 		"-n", strconv.Itoa(niceLevel),
 		"ffmpeg",
 		"-i", file.sourcePath,
 		"-threads", strconv.Itoa(threads),
-		"-c:v", "libsvtav1",
-		"-crf", "25",
-		"-preset", "8",
-		"-svtav1-params", "lp="+strconv.Itoa(threads),
+		"-c:v", "libx264",
+		"-crf", "23",
+		"-preset", "slow",
 		"-c:a", "aac",
 		"-b:a", "128k",
+		"-movflags", "+faststart",
 		outputPath,
 	)
+
+
 
 	// Перенаправляем вывод ffmpeg
 	cmd.Stdout = os.Stdout
