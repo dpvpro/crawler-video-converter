@@ -28,7 +28,7 @@ const (
 	// Nice level для процессов ffmpeg (0-19, больше = ниже приоритет)
 	niceLevel = 10
 	// Количество потоков ffmpeg по умолчанию
-	defaultThreads = 2
+	defaultFfmpegInstance = 2
 )
 
 // VideoFile представляет видео файл для обработки
@@ -124,9 +124,9 @@ func main() {
 	}()
 
 	// Парсинг аргументов командной строки
-	var threads int
-	flag.IntVar(&threads, "threads", defaultThreads, "Количество потоков для ffmpeg (full)")
-	flag.IntVar(&threads, "t", defaultThreads, "Количество потоков для ffmpeg (short)")
+	var ffmpegInstance int
+	flag.IntVar(&ffmpegInstance, "threads", defaultFfmpegInstance, "Количество экземпляров ffmpeg (full)")
+	flag.IntVar(&ffmpegInstance, "t", defaultFfmpegInstance, "Количество экземпляров ffmpeg (short)")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Использование: %s [опции] <путь_к_каталогу>\n", os.Args[0])
@@ -136,7 +136,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "\nОпции:\n")
 		flag.PrintDefaults()
 		fmt.Fprintf(os.Stderr, "\nОграничение нагрузки:\n")
-		fmt.Fprintf(os.Stderr, "  - Потоков ffmpeg: %d (по умолчанию)\n", defaultThreads)
+		fmt.Fprintf(os.Stderr, "  - Потоков ffmpeg: %d (по умолчанию)\n", defaultFfmpegInstance)
 		fmt.Fprintf(os.Stderr, "  - Nice level: %d (низкий приоритет)\n", niceLevel)
 	}
 	flag.Parse()
@@ -149,7 +149,7 @@ func main() {
 	}
 
 	// Проверка корректности количества потоков
-	if threads < 1 {
+	if ffmpegInstance < 1 {
 		fmt.Fprintf(os.Stderr, "Ошибка: количество потоков должно быть положительным числом\n")
 		os.Exit(1)
 	}
@@ -172,7 +172,7 @@ func main() {
 
 	fmt.Printf("Начинаем обработку каталога: %s\n", rootPath)
 	fmt.Printf("Поиск файлов с расширениями: %s\n", sourceExtensions)
-	fmt.Printf("Потоков ffmpeg: %d\n", threads)
+	fmt.Printf("Потоков ffmpeg: %d\n", ffmpegInstance)
 	fmt.Printf("Nice level: %d\n\n", niceLevel)
 
 	// Поиск видео файлов
@@ -189,7 +189,7 @@ func main() {
 	fmt.Printf("Найдено %d файлов для обработки\n\n", len(files))
 
 	// Обработка файлов последовательно
-	err = processFiles(files, pm, threads)
+	err = processFiles(files, pm, ffmpegInstance)
 	if err != nil {
 		if err == context.Canceled {
 			fmt.Println("\n[ОТМЕНА] Обработка прервана пользователем")
@@ -265,7 +265,7 @@ func processFiles(files []VideoFile, pm *ProcessManager, threads int) error {
 			defer pm.wg.Done()
 			defer func() { <-sem }() // Освобождаем слот
 
-			result := processFile(f, pm, 1) // 1 поток на каждый ffmpeg
+			result := processFile(f, pm)
 
 			// Сохраняем результат
 			resultsMu.Lock()
@@ -301,7 +301,7 @@ func processFiles(files []VideoFile, pm *ProcessManager, threads int) error {
 }
 
 // processFile обрабатывает один видео файл
-func processFile(file VideoFile, pm *ProcessManager, threads int) int {
+func processFile(file VideoFile, pm *ProcessManager) int {
 	// Проверяем контекст перед началом
 	select {
 	case <-pm.ctx.Done():
@@ -336,7 +336,7 @@ func processFile(file VideoFile, pm *ProcessManager, threads int) int {
 		return 1
 	}
 
-	fmt.Printf("[НАЧАЛО] %s (threads=%d)\n", file.fileName, threads)
+	fmt.Printf("[НАЧАЛО] %s\n", file.fileName)
 
 	// Маркер для неполного файла
 	incompleteMarker := outputPath + ".incomplete"
@@ -364,7 +364,7 @@ func processFile(file VideoFile, pm *ProcessManager, threads int) int {
 		"-n", strconv.Itoa(niceLevel),
 		"ffmpeg",
 		"-i", file.sourcePath,
-		"-threads", strconv.Itoa(threads),
+		"-threads", "1",
 		"-c:v", "libx264",
 		"-crf", "23",
 		"-preset", "slow",
@@ -373,8 +373,6 @@ func processFile(file VideoFile, pm *ProcessManager, threads int) int {
 		"-movflags", "+faststart",
 		outputPath,
 	)
-
-
 
 	// Перенаправляем вывод ffmpeg
 	cmd.Stdout = os.Stdout
