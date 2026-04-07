@@ -81,7 +81,7 @@ func (pm *ProcessManager) Shutdown() {
 	for cmd := range pm.processes {
 		if cmd.Process != nil {
 			fmt.Printf("[ЗАВЕРШЕНИЕ] Останавливаем процесс PID %d\n", cmd.Process.Pid)
-			cmd.Process.Signal(os.Interrupt)
+			_ = cmd.Process.Signal(os.Interrupt)
 		}
 	}
 	pm.mu.Unlock()
@@ -101,7 +101,7 @@ func (pm *ProcessManager) Shutdown() {
 		pm.mu.Lock()
 		for cmd := range pm.processes {
 			if cmd.Process != nil {
-				cmd.Process.Kill()
+				_ = cmd.Process.Kill()
 			}
 		}
 		pm.mu.Unlock()
@@ -349,8 +349,8 @@ func processFile(file VideoFile, pm *ProcessManager) int {
 
 	// Функция очистки при ошибке или отмене
 	cleanup := func() {
-		os.Remove(outputPath)
-		os.Remove(incompleteMarker)
+		_ = os.Remove(outputPath)
+		_ = os.Remove(incompleteMarker)
 		fmt.Printf("[ОЧИСТКА] Удален неполный файл: %s\n", outputFileName)
 	}
 
@@ -399,7 +399,7 @@ func processFile(file VideoFile, pm *ProcessManager) int {
 	case <-pm.ctx.Done():
 		// Контекст отменен, останавливаем процесс
 		if cmd.Process != nil {
-			cmd.Process.Signal(os.Interrupt)
+			_ = cmd.Process.Signal(os.Interrupt)
 		}
 		// Ждем завершения с таймаутом
 		select {
@@ -407,7 +407,7 @@ func processFile(file VideoFile, pm *ProcessManager) int {
 			// Процесс завершился сам
 		case <-time.After(5 * time.Second):
 			if cmd.Process != nil {
-				cmd.Process.Kill()
+				_ = cmd.Process.Kill()
 			}
 		}
 		cleanup()
